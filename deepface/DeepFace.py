@@ -2,7 +2,7 @@
 import os
 import warnings
 import logging
-from typing import Any, Dict, IO, List, Union, Optional, Sequence, Tuple, cast
+from typing import Any, Dict, IO, List, Union, Optional, Sequence, Tuple, cast, Callable
 
 # this has to be set before importing tensorflow
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -11,6 +11,7 @@ os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 # 3rd party dependencies
 from numpy.typing import NDArray
+
 import pandas as pd
 import tensorflow as tf
 from lightphe import LightPHE
@@ -31,6 +32,7 @@ from deepface.modules import (
     datastore,
 )
 from deepface import __version__
+
 
 logger = Logger()
 
@@ -77,7 +79,7 @@ def verify(
     img2_path: Union[str, NDArray[Any], IO[bytes], List[float]],
     model_name: str = "VGG-Face",
     detector_backend: str = "opencv",
-    distance_metric: str = "cosine",
+    distance_metric: Union[str, Callable] = "cosine", # type: ignore[type-arg]
     enforce_detection: bool = True,
     align: bool = True,
     expand_percentage: int = 0,
@@ -282,7 +284,7 @@ def find(
     img_path: Union[str, NDArray[Any], IO[bytes]],
     db_path: str,
     model_name: str = "VGG-Face",
-    distance_metric: str = "cosine",
+    distance_metric: Union[str, Callable] = "cosine", # type: ignore[type-arg]
     enforce_detection: bool = True,
     detector_backend: str = "opencv",
     align: bool = True,
@@ -760,7 +762,7 @@ def register(
             Options: base, raw, Facenet, Facenet2018, VGGFace, VGGFace2, ArcFace (default is base).
         anti_spoofing (boolean): Flag to enable anti spoofing (default is False).
         database_type (str): Type of database to register identities. Options: 'postgres', 'mongo',
-            'weaviate', 'neo4j', 'pgvector', 'pinecone', 'milvus' (default is 'postgres').
+            'weaviate', 'neo4j', 'pgvector', 'pinecone', 'milvus', 'qdrant' (default is 'postgres').
         connection_details (dict or str): Connection details for the database.
         connection (Any): Existing database connection object. If provided, this connection
             will be used instead of creating a new one.
@@ -774,6 +776,7 @@ def register(
             - DEEPFACE_NEO4J_URI
             - DEEPFACE_PINECONE_API_KEY
             - DEEPFACE_MILVUS_URI
+            - DEEPFACE_QDRANT_URI
     Returns:
         result (dict): A dictionary containing registration results with following keys.
             - inserted (int): Number of embeddings successfully registered to the database.
@@ -845,7 +848,7 @@ def search(
         search_method (str): Method to use for searching identities. Options: 'exact', 'ann'.
             To use ann search, you must run build_index function first to create the index.
         database_type (str): Type of database to search identities. Options: 'postgres', 'mongo',
-            'weaviate', 'neo4j', 'pgvector', 'pinecone', 'milvus' (default is 'postgres').
+            'weaviate', 'neo4j', 'pgvector', 'pinecone', 'milvus', 'qdrant' (default is 'postgres').
         connection_details (dict or str): Connection details for the database.
         connection (Any): Existing database connection object. If provided, this connection
             will be used instead of creating a new one.
@@ -859,6 +862,7 @@ def search(
             - DEEPFACE_NEO4J_URI
             - DEEPFACE_PINECONE_API_KEY
             - DEEPFACE_MILVUS_URI
+            - DEEPFACE_QDRANT_URI
     Returns:
         results (List[pd.DataFrame]):
             A list of pandas dataframes or a list of dicts. Each dataframe or dict corresponds
@@ -921,7 +925,8 @@ def build_index(
     - Use this function after registering all identities to the database.
     - This function is resumable, run again whenever new identities are added to the db.
     - Vector databases handle indexing internally, so you don't need to use this function
-        when using a vector database ('weaviate', 'neo4j', 'pgvector', 'pinecone')
+        when using a vector database
+        ('weaviate', 'neo4j', 'pgvector', 'pinecone', 'milvus', 'qdrant')
         as database_type.
 
     Args:
@@ -936,7 +941,7 @@ def build_index(
         max_neighbors_per_node (int): Maximum number of neighbors per node in the index
             (default is 32).
         database_type (str): Type of database to build index. Options: 'postgres', 'mongo',
-            'weaviate', 'neo4j', 'pgvector', 'pinecone', 'milvus' (default is 'postgres').
+            'weaviate', 'neo4j', 'pgvector', 'pinecone', 'milvus', 'qdrant' (default is 'postgres').
         connection (Any): Existing database connection object. If provided, this connection
             will be used instead of creating a new one.
         connection_details (dict or str): Connection details for the database.
@@ -950,6 +955,7 @@ def build_index(
             - DEEPFACE_NEO4J_URI
             - DEEPFACE_PINECONE_API_KEY
             - DEEPFACE_MILVUS_URI
+            - DEEPFACE_QDRANT_URI
     """
     return datastore.build_index(
         model_name=model_name,

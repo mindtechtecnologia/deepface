@@ -1,6 +1,7 @@
 # 3rd party dependencies
 import pytest
 import cv2
+import numpy as np
 
 # project dependencies
 from deepface import DeepFace
@@ -201,6 +202,41 @@ def test_verify_for_nested_embeddings():
 
     logger.info("✅ test verify for nested embeddings is done")
 
+def cosine_similarity(x, y):
+    x = np.atleast_2d(x)
+    y = np.atleast_2d(y)
+
+    x_norm = x / np.linalg.norm(x, axis=1, keepdims=True)
+    y_norm = y / np.linalg.norm(y, axis=1, keepdims=True)
+
+    # rows = y (second arg), columns = x (first arg) — matches find_distance's (M, N) contract
+    similarity = np.dot(y_norm, x_norm.T)
+    distance_matrix = 1.0 - similarity
+    return distance_matrix
+
+def test_verify_for_custom_metrics():
+    img1_path = "dataset/img59.jpg"
+    img2_path = "dataset/img62.jpg"
+
+    _ = DeepFace.verify(img1_path = img1_path, img2_path = img2_path, distance_metric = cosine_similarity, threshold = 0.68)
+    
+    assert _['verified'] 
+    assert _['similarity_metric'] == cosine_similarity
+
+    img1_path = "dataset/img41.jpg"
+    img2_path = "dataset/img42.jpg"
+
+    _ = DeepFace.verify(img1_path = img1_path, img2_path = img2_path, distance_metric = cosine_similarity, threshold = 0.68)
+    
+    assert not _['verified']
+    logger.info("✅ test verify for custom distance metric is done")
+
+def test_verify_for_custom_metrics_without_custom_threshold():
+   with pytest.raises(ValueError, match = 'Threshold must be specified when using custom distance metrics'):
+     DeepFace.verify(img1_path = "dataset/img41.jpg", img2_path = "dataset/img42.jpg", distance_metric = cosine_similarity)
+
+    # img47 is webp even though its extension is jpg
+   logger.info("✅ test verify for custom distance metric without custom threshold is done")
 
 def test_compability_of_verify_and_represent():
     """
@@ -257,3 +293,25 @@ def test_confidence():
             result["confidence"] <= 49
         ), f"Confidence should be <= 49 for different persons, got {result['confidence']}"
         logger.info(f"✅ test confidence for {distance_metric} metric is done")
+
+def test_find_distance_for_custom_metrics_with_list_of_embeddings():
+    img_paths = ["dataset/img1.jpg", "dataset/img2.jpg", "dataset/img3.jpg"]
+
+    embeddings = [
+        DeepFace.represent(img_path=p, model_name="Facenet")[0]["embedding"]
+        for p in img_paths
+    ]
+
+    source_embeddings = np.array(embeddings[:2])  # (2, D)
+    target_embeddings = np.array(embeddings)  # (3, D)
+
+    distances = find_distance(
+        alpha_embedding=source_embeddings,
+        beta_embedding=target_embeddings,
+        distance_metric=cosine_similarity,
+    )
+
+    assert isinstance(distances, np.ndarray)
+    assert distances.shape == (3, 2)
+
+    logger.info("✅ test find_distance for custom distance metric with list of embeddings is done")

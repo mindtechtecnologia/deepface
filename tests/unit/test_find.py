@@ -10,6 +10,8 @@ from deepface import DeepFace
 from deepface.modules import verification
 from deepface.commons import image_utils
 from deepface.commons.logger import Logger
+import pytest
+import numpy as np
 
 logger = Logger()
 
@@ -172,6 +174,23 @@ def test_find_without_refresh_database():
         assert df.shape[0] > 0
     logger.info("✅ test find without refresh database done")
 
+def test_find_for_custom_metrics():
+    img_path = os.path.join("dataset", "img1.jpg")
+    dfs = DeepFace.find(img_path = img_path, db_path = "dataset", distance_metric = cosine_similarity, threshold = 0.68)
+
+    df = dfs[0]
+    # img47 is webp even though its extension is jpg
+    assert df[df["identity"] == "dataset/img47.jpg"].shape[0] == 0
+    logger.info("✅ test find for custom distance metric is done")
+
+def test_find_for_custom_metrics_without_custom_threshold():
+    img_path = os.path.join("dataset", "img1.jpg")
+
+    with pytest.raises(ValueError, match = 'Threshold must be specified when using custom distance metrics'):
+     DeepFace.find(img_path = img_path, db_path = "dataset", distance_metric = cosine_similarity)
+
+    # img47 is webp even though its extension is jpg
+    logger.info("✅ test find for custom distance metric without custom threshold is done")
 
 def test_find_for_similarity_search():
     angelinas = [
@@ -217,3 +236,19 @@ def test_find_for_similarity_search():
         assert similar_df["distance"].min() > verification_threshold
 
     logger.info("✅ test find for similarity search done")
+
+def cosine_similarity(x, y):
+    x = np.atleast_2d(x)
+    y = np.atleast_2d(y)
+    
+    # Normalize vectors to unit length (L2 norm)
+    x_norm = x / np.linalg.norm(x, axis=1, keepdims=True)
+    y_norm = y / np.linalg.norm(y, axis=1, keepdims=True)
+    
+    # Compute cosine similarity via dot product
+    similarity = np.dot(x_norm, y_norm.T)
+    
+    # Convert similarity to distance
+    distance_matrix = 1.0 - similarity
+    return distance_matrix
+

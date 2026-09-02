@@ -2,7 +2,9 @@
 import os
 
 # 3rd party dependencies
+import pytest
 import cv2
+import numpy as np
 
 # project dependencies
 from deepface import DeepFace
@@ -160,3 +162,57 @@ def test_filetype_for_find():
     assert not any(face["identity"] == "dataset/img47.jpg" for face in result)
 
     logger.info("✅ test wrong filetype done")
+
+
+def cosine_similarity(x, y):
+    x = np.atleast_2d(x)
+    y = np.atleast_2d(y)
+
+    x_norm = x / np.linalg.norm(x, axis=1, keepdims=True)
+    y_norm = y / np.linalg.norm(y, axis=1, keepdims=True)
+
+    # rows = y (target/query), columns = x (source/database) — matches find_distance's (M, N) contract
+    similarity = np.dot(y_norm, x_norm.T)
+    distance_matrix = 1.0 - similarity
+    return distance_matrix
+
+
+def test_find_batched_for_custom_metrics():
+    img_path = os.path.join("dataset", "img1.jpg")
+    dfs = DeepFace.find(
+        img_path=img_path,
+        db_path="dataset",
+        distance_metric=cosine_similarity,
+        threshold=0.68,
+        batched=True,
+    )
+
+    assert isinstance(dfs, list)
+    assert len(dfs) > 0
+    for result_dicts in dfs:
+        assert isinstance(result_dicts, list)
+        for item in result_dicts:
+            assert isinstance(item, dict)
+            assert "distance" in item
+            assert "identity" in item
+
+    logger.info("✅ test find batched for custom distance metric is done")
+
+
+def test_find_batched_for_custom_metrics_without_custom_threshold():
+    img_path = os.path.join("dataset", "img1.jpg")
+
+    with pytest.raises(
+        ValueError, match="Threshold must be specified when using custom distance metrics"
+    ):
+        DeepFace.find(
+            img_path=img_path,
+            db_path="dataset",
+            distance_metric=cosine_similarity,
+            batched=True,
+        )
+
+    logger.info(
+        "✅ test find batched for custom distance metric without custom threshold is done"
+    )
+
