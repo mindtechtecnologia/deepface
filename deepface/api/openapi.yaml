@@ -1,0 +1,1019 @@
+openapi: 3.0.3
+info:
+  title: DeepFace API
+  description: |
+    REST API for the DeepFace face recognition and analysis library.
+
+    Endpoints accept input images as:
+    - A JSON body with `img` as a base64-encoded string, URL, or local file path
+    - A `multipart/form-data` body with `img` as an uploaded file
+
+    Authentication is optional. When enabled, a Bearer token must be supplied via
+    the `Authorization` header.
+  version: 0.0.1
+  license:
+    name: MIT
+    url: https://github.com/serengil/deepface/blob/master/LICENSE
+
+servers:
+  - url: http://localhost:5005
+    description: Local development server
+
+security:
+  - bearerAuth: []
+  - {}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    # ── Shared parameter enums ──────────────────────────────────────────────
+
+    ModelName:
+      type: string
+      description: Face recognition model to use.
+      default: VGG-Face
+      enum:
+        - VGG-Face
+        - OpenFace
+        - Facenet
+        - Facenet512
+        - DeepFace
+        - DeepID
+        - Dlib
+        - ArcFace
+        - SFace
+        - GhostFaceNet
+        - Buffalo_L
+
+    DetectorBackend:
+      type: string
+      description: Face detector backend to use.
+      default: opencv
+      enum:
+        - opencv
+        - ssd
+        - dlib
+        - mtcnn
+        - fastmtcnn
+        - retinaface
+        - mediapipe
+        - yolov8n
+        - yolov8m
+        - yolov8l
+        - yolov11n
+        - yolov11s
+        - yolov11m
+        - yolov11l
+        - yolov12n
+        - yolov12s
+        - yolov12m
+        - yolov12l
+        - yunet
+        - centerface
+        - skip
+
+    DistanceMetric:
+      type: string
+      description: Similarity metric used to compare face embeddings.
+      default: cosine
+      enum:
+        - cosine
+        - euclidean
+        - euclidean_l2
+        - angular
+
+    Normalization:
+      type: string
+      description: Pixel normalisation strategy applied before embedding extraction.
+      default: base
+      enum:
+        - base
+        - raw
+        - Facenet
+        - Facenet2018
+        - VGGFace
+        - VGGFace2
+        - ArcFace
+
+    # ── Reusable building blocks ────────────────────────────────────────────
+
+    FacialArea:
+      type: object
+      description: Bounding box of a detected face.
+      properties:
+        x:
+          type: integer
+          description: Left edge x-coordinate (pixels).
+        y:
+          type: integer
+          description: Top edge y-coordinate (pixels).
+        w:
+          type: integer
+          description: Width of the face region (pixels).
+        h:
+          type: integer
+          description: Height of the face region (pixels).
+        left_eye:
+          type: array
+          nullable: true
+          description: "(x, y) pixel coordinates of the left eye, if detected."
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+        right_eye:
+          type: array
+          nullable: true
+          description: "(x, y) pixel coordinates of the right eye, if detected."
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+
+    EmbeddingResult:
+      type: object
+      description: Embedding vector and metadata for a single detected face.
+      properties:
+        embedding:
+          type: array
+          description: >
+            Numerical face embedding vector. Dimensionality depends on the model
+            (e.g. 128 for Facenet, 4096 for VGG-Face).
+          items:
+            type: number
+            format: float
+        facial_area:
+          $ref: "#/components/schemas/FacialArea"
+        face_confidence:
+          type: number
+          format: float
+          description: Detector confidence score for this face (0–1).
+
+    AnalysisResult:
+      type: object
+      description: Facial attribute analysis for a single detected face.
+      properties:
+        region:
+          $ref: "#/components/schemas/FacialArea"
+        face_confidence:
+          type: number
+          format: float
+          description: Detector confidence score (0–1).
+        age:
+          type: number
+          format: float
+          description: Estimated age in years. Present only when `age` is in `actions`.
+        dominant_gender:
+          type: string
+          description: Predicted gender. Present only when `gender` is in `actions`.
+          enum: [Man, Woman]
+        gender:
+          type: object
+          description: >
+            Per-gender confidence scores (0–1). Present only when `gender` is in
+            `actions`.
+          properties:
+            Man:
+              type: number
+              format: float
+            Woman:
+              type: number
+              format: float
+        dominant_emotion:
+          type: string
+          description: Predicted dominant emotion. Present only when `emotion` is in `actions`.
+          enum: [angry, disgust, fear, happy, neutral, sad, surprise]
+        emotion:
+          type: object
+          description: >
+            Per-emotion confidence scores (0–1). Present only when `emotion` is in
+            `actions`.
+          properties:
+            angry:
+              type: number
+              format: float
+            disgust:
+              type: number
+              format: float
+            fear:
+              type: number
+              format: float
+            happy:
+              type: number
+              format: float
+            neutral:
+              type: number
+              format: float
+            sad:
+              type: number
+              format: float
+            surprise:
+              type: number
+              format: float
+        dominant_race:
+          type: string
+          description: Predicted dominant race. Present only when `race` is in `actions`.
+          enum:
+            - asian
+            - black
+            - indian
+            - latino hispanic
+            - middle eastern
+            - white
+        race:
+          type: object
+          description: >
+            Per-race confidence scores (0–1). Present only when `race` is in
+            `actions`.
+          properties:
+            asian:
+              type: number
+              format: float
+            black:
+              type: number
+              format: float
+            indian:
+              type: number
+              format: float
+            latino hispanic:
+              type: number
+              format: float
+            middle eastern:
+              type: number
+              format: float
+            white:
+              type: number
+              format: float
+
+    SearchRecord:
+      type: object
+      description: A single face-search result row (columns vary by database).
+      additionalProperties: true
+
+    # ── Error responses ─────────────────────────────────────────────────────
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error description.
+
+    ExceptionResponse:
+      type: object
+      properties:
+        exception:
+          type: string
+          description: Exception message from input validation.
+
+    UnauthorizedResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Invalid or missing authentication token
+
+paths:
+  /:
+    get:
+      summary: Health check
+      description: Returns a simple HTML welcome message confirming the API is running.
+      operationId: home
+      security: []
+      responses:
+        "200":
+          description: API is running.
+          content:
+            text/html:
+              schema:
+                type: string
+                example: "<h1>Welcome to DeepFace API v0.0.1!</h1>"
+
+  /represent:
+    post:
+      summary: Extract face embeddings
+      description: |
+        Detects faces in the supplied image and returns an embedding vector for
+        each detected face.
+
+        The request body can be sent as:
+        - `application/json` – `img` is a base64-encoded string, URL, or file path.
+        - `multipart/form-data` – `img` is an uploaded image file; other parameters
+          are passed as text fields.
+      operationId: represent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  description: Base64-encoded image, public URL, or local file path.
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                  description: >
+                    Raise an error when no face is detected. Set to `false` to
+                    return an embedding for the whole image.
+                align:
+                  type: boolean
+                  default: true
+                  description: Align faces before embedding extraction.
+                anti_spoofing:
+                  type: boolean
+                  default: false
+                  description: Reject spoofed/non-live faces.
+                max_faces:
+                  type: integer
+                  nullable: true
+                  description: Maximum number of faces to process. `null` means no limit.
+            example:
+              img: "https://example.com/face.jpg"
+              model_name: Facenet
+              detector_backend: mtcnn
+          multipart/form-data:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  format: binary
+                  description: Image file to upload.
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                align:
+                  type: boolean
+                  default: true
+                anti_spoofing:
+                  type: boolean
+                  default: false
+                max_faces:
+                  type: integer
+      responses:
+        "200":
+          description: Embeddings extracted successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EmbeddingResult"
+              example:
+                results:
+                  - embedding: [0.12, -0.34, 0.56]
+                    facial_area:
+                      x: 50
+                      y: 30
+                      w: 200
+                      h: 250
+                      left_eye: [110, 130]
+                      right_eye: [190, 130]
+                    face_confidence: 0.97
+        "400":
+          description: Bad request (invalid input or no face detected).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ExceptionResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+
+  /verify:
+    post:
+      summary: Verify if two faces belong to the same person
+      description: |
+        Compares the embeddings of two faces and determines whether they belong
+        to the same person based on a configurable distance threshold.
+
+        The request body can be sent as:
+        - `application/json` – `img1` / `img2` are base64 strings, URLs, or paths.
+        - `multipart/form-data` – `img1` / `img2` are uploaded image files.
+      operationId: verify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [img1, img2]
+              properties:
+                img1:
+                  type: string
+                  description: First image – base64 string, URL, or file path.
+                img2:
+                  type: string
+                  description: Second image – base64 string, URL, or file path.
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                distance_metric:
+                  $ref: "#/components/schemas/DistanceMetric"
+                align:
+                  type: boolean
+                  default: true
+                enforce_detection:
+                  type: boolean
+                  default: true
+                anti_spoofing:
+                  type: boolean
+                  default: false
+            example:
+              img1: "https://example.com/person-a-1.jpg"
+              img2: "https://example.com/person-a-2.jpg"
+              model_name: Facenet
+              distance_metric: euclidean
+          multipart/form-data:
+            schema:
+              type: object
+              required: [img1, img2]
+              properties:
+                img1:
+                  type: string
+                  format: binary
+                img2:
+                  type: string
+                  format: binary
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                distance_metric:
+                  $ref: "#/components/schemas/DistanceMetric"
+                align:
+                  type: boolean
+                  default: true
+                enforce_detection:
+                  type: boolean
+                  default: true
+                anti_spoofing:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Verification result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                    description: "`true` if both images show the same person."
+                  distance:
+                    type: number
+                    format: float
+                    description: Embedding distance (lower = more similar).
+                  threshold:
+                    type: number
+                    format: float
+                    description: Decision threshold for the chosen distance metric.
+                  confidence:
+                    type: number
+                    format: float
+                    description: Verification confidence (0–100).
+                  model:
+                    type: string
+                    description: Recognition model used.
+                  detector_backend:
+                    type: string
+                    description: Detector backend used.
+                  similarity_metric:
+                    type: string
+                    description: Distance metric used.
+                  facial_areas:
+                    type: object
+                    description: Bounding boxes of the detected faces in each image.
+                    properties:
+                      img1:
+                        $ref: "#/components/schemas/FacialArea"
+                      img2:
+                        $ref: "#/components/schemas/FacialArea"
+                  time:
+                    type: number
+                    format: float
+                    description: Processing time in seconds.
+              example:
+                verified: true
+                distance: 0.23
+                threshold: 0.40
+                confidence: 92.5
+                model: VGG-Face
+                detector_backend: opencv
+                similarity_metric: cosine
+                facial_areas:
+                  img1:
+                    x: 10
+                    y: 15
+                    w: 200
+                    h: 250
+                    left_eye: [50, 100]
+                    right_eye: [150, 100]
+                  img2:
+                    x: 20
+                    y: 25
+                    w: 210
+                    h: 240
+                    left_eye: [55, 105]
+                    right_eye: [155, 105]
+                time: 0.45
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ExceptionResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+
+  /analyze:
+    post:
+      summary: Analyze facial attributes
+      description: |
+        Detects faces in the image and predicts one or more facial attributes
+        (age, gender, emotion, race) for each detected face.
+
+        The request body can be sent as:
+        - `application/json` – `img` is a base64 string, URL, or file path.
+        - `multipart/form-data` – `img` is an uploaded file; `actions` is a
+          comma-separated string or a bracketed list (e.g. `"[age, gender]"`).
+      operationId: analyze
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  description: Base64-encoded image, public URL, or local file path.
+                actions:
+                  type: array
+                  description: Attributes to analyse.
+                  default: [age, gender, emotion, race]
+                  items:
+                    type: string
+                    enum: [age, gender, emotion, race]
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                align:
+                  type: boolean
+                  default: true
+                anti_spoofing:
+                  type: boolean
+                  default: false
+            example:
+              img: "https://example.com/face.jpg"
+              actions: [age, gender]
+          multipart/form-data:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  format: binary
+                actions:
+                  type: string
+                  description: >
+                    Comma-separated list of actions, optionally wrapped in brackets,
+                    e.g. `"[age, gender]"`.
+                  default: "age,gender,emotion,race"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                align:
+                  type: boolean
+                  default: true
+                anti_spoofing:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Analysis results, one entry per detected face.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AnalysisResult"
+              example:
+                results:
+                  - region:
+                      x: 120
+                      y: 80
+                      w: 300
+                      h: 400
+                    face_confidence: 0.99
+                    age: 28.5
+                    dominant_gender: Woman
+                    gender:
+                      Man: 0.02
+                      Woman: 0.98
+                    dominant_emotion: happy
+                    emotion:
+                      angry: 0.01
+                      disgust: 0.02
+                      fear: 0.01
+                      happy: 0.85
+                      neutral: 0.10
+                      sad: 0.01
+                      surprise: 0.00
+                    dominant_race: asian
+                    race:
+                      asian: 0.75
+                      black: 0.05
+                      indian: 0.10
+                      latino hispanic: 0.05
+                      middle eastern: 0.02
+                      white: 0.03
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ExceptionResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+
+  /register:
+    post:
+      summary: Register a face in the vector database
+      description: |
+        Extracts the face embedding from the supplied image and stores it in the
+        configured vector database.
+
+        Requires the `DEEPFACE_CONNECTION_DETAILS` environment variable to be set.
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  description: Base64-encoded image, public URL, or local file path.
+                img_name:
+                  type: string
+                  nullable: true
+                  description: >
+                    Identifier stored alongside the embedding. Useful for labelling
+                    the registered face.
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                align:
+                  type: boolean
+                  default: true
+                l2_normalize:
+                  type: boolean
+                  default: false
+                  description: L2-normalise the embedding vector before storing.
+                expand_percentage:
+                  type: integer
+                  default: 0
+                  description: >
+                    Percentage by which to expand the detected face region before
+                    extracting the embedding.
+                normalization:
+                  $ref: "#/components/schemas/Normalization"
+                anti_spoofing:
+                  type: boolean
+                  default: false
+            example:
+              img: "https://example.com/person.jpg"
+              img_name: john_doe
+              model_name: Facenet
+              l2_normalize: true
+          multipart/form-data:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  format: binary
+                img_name:
+                  type: string
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                align:
+                  type: boolean
+                  default: true
+                l2_normalize:
+                  type: boolean
+                  default: false
+                expand_percentage:
+                  type: integer
+                  default: 0
+                normalization:
+                  $ref: "#/components/schemas/Normalization"
+                anti_spoofing:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Face registered successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Database-specific registration result.
+                additionalProperties: true
+        "400":
+          description: Bad request (e.g. no face detected).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ExceptionResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "500":
+          description: Database connection details not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: >
+                  Database connection details must be provided in
+                  `DEEPFACE_CONNECTION_DETAILS` environment variables
+
+  /search:
+    post:
+      summary: Search for a face in the vector database
+      description: |
+        Extracts an embedding from the query image and searches the configured
+        vector database for similar faces.
+
+        Requires the `DEEPFACE_CONNECTION_DETAILS` environment variable to be set.
+
+        Two search strategies are available:
+        - **`exact`** – exhaustive distance comparison against every stored embedding.
+        - **`ann`** – approximate nearest-neighbour search; requires a pre-built index
+          (see `POST /build/index`).
+      operationId: search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  description: Base64-encoded image, public URL, or local file path.
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                align:
+                  type: boolean
+                  default: true
+                distance_metric:
+                  $ref: "#/components/schemas/DistanceMetric"
+                l2_normalize:
+                  type: boolean
+                  default: false
+                search_method:
+                  type: string
+                  default: exact
+                  enum: [exact, ann]
+                  description: Search strategy to use.
+                expand_percentage:
+                  type: integer
+                  default: 0
+                normalization:
+                  $ref: "#/components/schemas/Normalization"
+                anti_spoofing:
+                  type: boolean
+                  default: false
+                similarity_search:
+                  type: boolean
+                  default: false
+                  description: >
+                    When `true`, return only matches below the distance threshold
+                    (similarity search mode).
+                k:
+                  type: integer
+                  nullable: true
+                  description: >
+                    Maximum number of results to return. Defaults to `5` when
+                    `similarity_search` is `false`.
+            example:
+              img: "https://example.com/query.jpg"
+              model_name: Facenet
+              search_method: exact
+              l2_normalize: true
+          multipart/form-data:
+            schema:
+              type: object
+              required: [img]
+              properties:
+                img:
+                  type: string
+                  format: binary
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                enforce_detection:
+                  type: boolean
+                  default: true
+                align:
+                  type: boolean
+                  default: true
+                distance_metric:
+                  $ref: "#/components/schemas/DistanceMetric"
+                l2_normalize:
+                  type: boolean
+                  default: false
+                search_method:
+                  type: string
+                  default: exact
+                  enum: [exact, ann]
+                expand_percentage:
+                  type: integer
+                  default: 0
+                normalization:
+                  $ref: "#/components/schemas/Normalization"
+                anti_spoofing:
+                  type: boolean
+                  default: false
+                similarity_search:
+                  type: boolean
+                  default: false
+                k:
+                  type: integer
+      responses:
+        "200":
+          description: Search results, one array per detected face in the query image.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    description: >
+                      Each element corresponds to one detected face and contains a
+                      list of matching database records.
+                    items:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/SearchRecord"
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ExceptionResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "500":
+          description: Database connection details not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /build/index:
+    post:
+      summary: Build an ANN index for the vector database
+      description: |
+        Builds (or rebuilds) an approximate nearest-neighbour index over all
+        embeddings currently stored in the database, enabling fast `ann` searches
+        via `POST /search`.
+
+        Requires the `DEEPFACE_CONNECTION_DETAILS` environment variable to be set.
+      operationId: buildIndex
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model_name:
+                  $ref: "#/components/schemas/ModelName"
+                detector_backend:
+                  $ref: "#/components/schemas/DetectorBackend"
+                align:
+                  type: boolean
+                  default: true
+                l2_normalize:
+                  type: boolean
+                  default: false
+                  description: >
+                    Must match the `l2_normalize` value used during registration.
+            example:
+              model_name: Facenet
+              detector_backend: mtcnn
+              align: true
+              l2_normalize: true
+      responses:
+        "200":
+          description: Index built successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+              example:
+                message: Index built successfully
+        "400":
+          description: Error building the index.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "500":
+          description: Database connection details not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
